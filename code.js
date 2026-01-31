@@ -13,46 +13,58 @@ function pushSiblings(originalNode, direction, shiftX, shiftY, excludedIds) {
   const parent = originalNode.parent;
   if (!parent) return;
 
-  const margin = 0.5; // Slight margin to handle sub-pixel alignment
+  const margin = 0.5;
+  const nodesToMove = new Set();
+  
+  // Starting target rectangle for the new duplicate
+  let targetX = originalNode.x;
+  let targetY = originalNode.y;
+  if (direction.includes('left')) targetX -= shiftX;
+  else if (direction.includes('right')) targetX += shiftX;
+  if (direction.includes('top')) targetY -= shiftY;
+  else if (direction.includes('bottom')) targetY += shiftY;
 
-  for (const sibling of parent.children) {
-    if (excludedIds.has(sibling.id)) continue;
+  const checkQueue = [{
+    x: targetX,
+    y: targetY,
+    width: originalNode.width,
+    height: originalNode.height
+  }];
+  
+  const processed = new Set(excludedIds);
 
-    let moveX = 0;
-    let moveY = 0;
+  while (checkQueue.length > 0) {
+    const rect = checkQueue.shift();
+    
+    for (const sibling of parent.children) {
+      if (processed.has(sibling.id)) continue;
 
-    // Horizontal Corridor Check (for Left/Right pushes)
-    const alignedVertically = (sibling.y < originalNode.y + originalNode.height - margin) && 
-                              (sibling.y + sibling.height > originalNode.y + margin);
+      // Check for overlap with the current rectangle in the collision chain
+      const overlaps = (sibling.x < rect.x + rect.width - margin) && 
+                       (sibling.x + sibling.width > rect.x + margin) &&
+                       (sibling.y < rect.y + rect.height - margin) && 
+                       (sibling.y + sibling.height > rect.y + margin);
 
-    // Vertical Corridor Check (for Top/Bottom pushes)
-    const alignedHorizontally = (sibling.x < originalNode.x + originalNode.width - margin) && 
-                                (sibling.x + sibling.width > originalNode.x + margin);
-
-    if (direction.includes('right') && alignedVertically) {
-      if (sibling.x >= originalNode.x + originalNode.width - margin) {
-        moveX += shiftX;
-      }
-    } else if (direction.includes('left') && alignedVertically) {
-      if (sibling.x + sibling.width <= originalNode.x + margin) {
-        moveX -= shiftX;
+      if (overlaps) {
+        nodesToMove.add(sibling);
+        processed.add(sibling.id);
+        
+        // Add this sibling's future position to the queue to check for further collisions
+        checkQueue.push({
+          x: sibling.x + (direction.includes('left') ? -shiftX : (direction.includes('right') ? shiftX : 0)),
+          y: sibling.y + (direction.includes('top') ? -shiftY : (direction.includes('bottom') ? shiftY : 0)),
+          width: sibling.width,
+          height: sibling.height
+        });
       }
     }
+  }
 
-    if (direction.includes('bottom') && alignedHorizontally) {
-      if (sibling.y >= originalNode.y + originalNode.height - margin) {
-        moveY += shiftY;
-      }
-    } else if (direction.includes('top') && alignedHorizontally) {
-      if (sibling.y + sibling.height <= originalNode.y + margin) {
-        moveY -= shiftY;
-      }
-    }
-
-    if (moveX !== 0 || moveY !== 0) {
-      sibling.x += moveX;
-      sibling.y += moveY;
-    }
+  for (const node of nodesToMove) {
+    if (direction.includes('left')) node.x -= shiftX;
+    else if (direction.includes('right')) node.x += shiftX;
+    if (direction.includes('top')) node.y -= shiftY;
+    else if (direction.includes('bottom')) node.y += shiftY;
   }
 }
 
@@ -128,7 +140,6 @@ async function performDuplicate(direction, gap, pushEnabled) {
   }
 
   if (newSelection.length > 0) {
-    figma.currentPage.selection = newSelection;
     const dirLabel = direction.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
     if (autoLayoutWarning) figma.notify(`✅ Duplicated. Spacing handled by Auto Layout.`);
     else figma.notify(`✅ Duplicated ${dirLabel} with ${lastUsedEffectiveGap}px gap.`);
