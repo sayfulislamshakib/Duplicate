@@ -39,10 +39,57 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
       padding: 6px 0;
-      width: 140px;
+      width: 100%;
       box-sizing: border-box;
+    }
+
+    /* Toggle Switch Styles */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 28px;
+      height: 16px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #E5E5E5;
+      transition: .2s;
+      border-radius: 16px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 12px;
+      width: 12px;
+      left: 2px;
+      bottom: 2px;
+      background-color: white;
+      transition: .2s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--primary-color);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(12px);
     }
 
     label {
@@ -181,17 +228,37 @@
     .checkbox-row {
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
+      width: 100%;
       cursor: pointer;
+      gap: 12px;
+      user-select: none;
     }
 
-    .checkbox-row label {
+    .label-text {
       cursor: pointer;
       text-transform: none;
       color: var(--text-color);
       font-weight: 500;
       font-size: 12px;
       margin: 0;
+      flex-grow: 1;
+      text-align: left;
+    }
+
+    .auto-detect-container {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .subtitle {
+      font-size: 10px;
+      color: #888;
+      padding: 0;
+      line-height: 1.2;
+      margin-top: 4px;
+      text-align: left;
     }
   </style>
 </head>
@@ -210,19 +277,37 @@
     </div>
     <div class="divider"></div>
     <div class="input-row">
-      <div class="checkbox-row">
-        <input id="auto-detect" type="checkbox" checked>
-        <label for="auto-detect">Auto-detect gap</label>
+      <div class="auto-detect-container" style="width: 100%;">
+        <div class="checkbox-row" onclick="document.getElementById('auto-detect').click()">
+          <span class="label-text">Auto-detect gap</span>
+          <label class="switch" onclick="event.stopPropagation()">
+            <input id="auto-detect" type="checkbox" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div id="auto-detect-info" class="subtitle">
+          Large frames use 100px gap, small use 40px.
+        </div>
+        <div id="manual-gap-container" style="display: none; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; margin-top: 12px;">
+          <label for="gap" style="font-size: 10px; color: #888; text-transform: none;">Manual Gap</label>
+          <div class="stepper">
+            <button id="minus">−</button>
+            <input id="gap" type="number" value="40" min="0">
+            <button id="plus">+</button>
+          </div>
+        </div>
       </div>
-      <div id="auto-detect-info" style="font-size: 10px; color: #888; text-align: center; line-height: 1.4; padding: 0 10px;">
-        Large frames use 100px gap, small use 40px.
-      </div>
-      <div id="manual-gap-container" style="display: none; flex-direction: column; align-items: center; gap: 8px; width: 100%;">
-        <label for="gap">Gap</label>
-        <div class="stepper">
-          <button id="minus">−</button>
-          <input id="gap" type="number" value="40" min="0">
-          <button id="plus">+</button>
+
+      <div class="push-container" style="width: 100%;">
+        <div class="checkbox-row" onclick="document.getElementById('push-elements').click()">
+          <span class="label-text">Push others</span>
+          <label class="switch" onclick="event.stopPropagation()">
+            <input id="push-elements" type="checkbox" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="subtitle">
+          Shift existing elements to avoid overlapping.
         </div>
       </div>
     </div>
@@ -230,6 +315,7 @@
   <script>
     const gapInput = document.getElementById('gap');
     const autoDetectCheckbox = document.getElementById('auto-detect');
+    const pushCheckbox = document.getElementById('push-elements');
     const manualContainer = document.getElementById('manual-gap-container');
     const minusBtn = document.getElementById('minus');
     const plusBtn = document.getElementById('plus');
@@ -245,6 +331,10 @@
       parent.postMessage({ pluginMessage: { type: 'toggle-auto-detect', enabled: autoDetectCheckbox.checked } }, '*');
     };
 
+    pushCheckbox.onchange = () => {
+      parent.postMessage({ pluginMessage: { type: 'toggle-push', enabled: pushCheckbox.checked } }, '*');
+    };
+
     function updateGap(change) {
       if (autoDetectCheckbox.checked) return;
       let val = parseInt(gapInput.value) || 0;
@@ -258,7 +348,13 @@
 
     function duplicate(direction) {
       const gap = parseFloat(gapInput.value) || 0;
-      parent.postMessage({ pluginMessage: { type: 'duplicate', direction, gap, autoDetect: autoDetectCheckbox.checked } }, '*');
+      parent.postMessage({ pluginMessage: { 
+        type: 'duplicate', 
+        direction, 
+        gap, 
+        autoDetect: autoDetectCheckbox.checked,
+        push: pushCheckbox.checked
+      } }, '*');
     }
 
     document.getElementById('top').onclick = () => duplicate('top');
@@ -277,6 +373,7 @@
       if (msg.type === 'load-settings') {
         gapInput.value = msg.gap;
         if (msg.autoDetect !== undefined) autoDetectCheckbox.checked = msg.autoDetect;
+        if (msg.push !== undefined) pushCheckbox.checked = msg.push;
         syncUI();
       }
       if (msg.type === 'update-gap' && autoDetectCheckbox.checked) {

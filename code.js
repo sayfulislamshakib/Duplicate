@@ -5,8 +5,59 @@ function getDetectedGap(nodes) {
   return width > 400 ? 100 : 40;
 }
 
+/**
+ * Pushes siblings of a node in a given direction to make room for a duplicate.
+ * Only pushes elements that are aligned with the original node (within its "corridor").
+ */
+function pushSiblings(originalNode, direction, shiftX, shiftY, excludedIds) {
+  const parent = originalNode.parent;
+  if (!parent) return;
+
+  const margin = 0.5; // Slight margin to handle sub-pixel alignment
+
+  for (const sibling of parent.children) {
+    if (excludedIds.has(sibling.id)) continue;
+
+    let moveX = 0;
+    let moveY = 0;
+
+    // Horizontal Corridor Check (for Left/Right pushes)
+    const alignedVertically = (sibling.y < originalNode.y + originalNode.height - margin) && 
+                              (sibling.y + sibling.height > originalNode.y + margin);
+
+    // Vertical Corridor Check (for Top/Bottom pushes)
+    const alignedHorizontally = (sibling.x < originalNode.x + originalNode.width - margin) && 
+                                (sibling.x + sibling.width > originalNode.x + margin);
+
+    if (direction.includes('right') && alignedVertically) {
+      if (sibling.x >= originalNode.x + originalNode.width - margin) {
+        moveX += shiftX;
+      }
+    } else if (direction.includes('left') && alignedVertically) {
+      if (sibling.x + sibling.width <= originalNode.x + margin) {
+        moveX -= shiftX;
+      }
+    }
+
+    if (direction.includes('bottom') && alignedHorizontally) {
+      if (sibling.y >= originalNode.y + originalNode.height - margin) {
+        moveY += shiftY;
+      }
+    } else if (direction.includes('top') && alignedHorizontally) {
+      if (sibling.y + sibling.height <= originalNode.y + margin) {
+        moveY -= shiftY;
+      }
+    }
+
+    if (moveX !== 0 || moveY !== 0) {
+      sibling.x += moveX;
+      sibling.y += moveY;
+    }
+  }
+}
+
 // Function to handle the duplication logic
-async function performDuplicate(direction, gap) {
+async function performDuplicate(direction, gap, pushEnabled) {
   const selection = figma.currentPage.selection;
 
   if (selection.length === 0) {
@@ -14,23 +65,32 @@ async function performDuplicate(direction, gap) {
     return;
   }
 
+  // Sort selection based on direction to prevent overlapping "pushes"
+  const sortedSelection = [...selection].sort((a, b) => {
+    if (direction.includes('right')) return b.x - a.x;
+    if (direction.includes('left')) return a.x - b.x;
+    if (direction.includes('bottom')) return b.y - a.y;
+    if (direction.includes('top')) return a.y - b.y;
+    return 0;
+  });
+
   const newSelection = [];
+  const processedIds = new Set(selection.map(n => n.id));
   let autoLayoutWarning = false;
   let lastUsedEffectiveGap = 40;
 
-  for (const node of selection) {
+  for (const node of sortedSelection) {
     const parent = node.parent;
     if (!parent) continue;
 
-    // Logic: if gap is null, we are in auto-detect mode
     const effectiveGap = (gap !== undefined && gap !== null) ? gap : (node.width > 400 ? 100 : 40);
     lastUsedEffectiveGap = effectiveGap;
 
     try {
-      const clone = node.clone();
-      const isAutoLayout = 'layoutMode' in parent && (parent.layoutMode === 'HORIZONTAL' || parent.layoutMode === 'VERTICAL');
+      const isAutoLayout = 'layoutMode' in parent && (parent.layoutMode !== 'NONE');
 
       if (isAutoLayout) {
+        const clone = node.clone();
         const index = parent.children.indexOf(node);
         let newIndex = index + (direction.includes('right') || direction.includes('bottom') ? 1 : 0);
         if (typeof parent.insertChild === 'function') parent.insertChild(newIndex, clone);
@@ -38,15 +98,26 @@ async function performDuplicate(direction, gap) {
         newSelection.push(clone);
         autoLayoutWarning = true;
       } else {
+        const shiftX = node.width + effectiveGap;
+        const shiftY = node.height + effectiveGap;
+
+        // Push existing siblings if enabled
+        if (pushEnabled) {
+          pushSiblings(node, direction, shiftX, shiftY, processedIds);
+        }
+
+        const clone = node.clone();
         parent.appendChild(clone);
-        if (direction.includes('left')) clone.x = node.x - node.width - effectiveGap;
-        else if (direction.includes('right')) clone.x = node.x + node.width + effectiveGap;
+
+        if (direction.includes('left')) clone.x = node.x - shiftX;
+        else if (direction.includes('right')) clone.x = node.x + shiftX;
         else clone.x = node.x;
 
-        if (direction.includes('top')) clone.y = node.y - node.height - effectiveGap;
-        else if (direction.includes('bottom')) clone.y = node.y + node.height + effectiveGap;
+        if (direction.includes('top')) clone.y = node.y - shiftY;
+        else if (direction.includes('bottom')) clone.y = node.y + shiftY;
         else clone.y = node.y;
 
+        processedIds.add(clone.id);
         expandSectionIfNeeded(clone);
         newSelection.push(clone);
       }
@@ -57,8 +128,9 @@ async function performDuplicate(direction, gap) {
   }
 
   if (newSelection.length > 0) {
+    figma.currentPage.selection = newSelection;
     const dirLabel = direction.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
-    if (autoLayoutWarning) figma.notify(`✅ Duplicated. Spacing ignored in Auto Layout.`);
+    if (autoLayoutWarning) figma.notify(`✅ Duplicated. Spacing handled by Auto Layout.`);
     else figma.notify(`✅ Duplicated ${dirLabel} with ${lastUsedEffectiveGap}px gap.`);
   }
 }
@@ -88,29 +160,38 @@ function expandSectionIfNeeded(node) {
 }
 
 let isAutoDetectEnabled = true;
+let isPushEnabled = true;
 
 if (figma.command === 'open_ui' || figma.command === '') {
-  figma.showUI(__html__, { width: 240, height: 350 });
+  figma.showUI(__html__, { width: 240, height: 380 });
   const initialGap = getDetectedGap(figma.currentPage.selection);
-  figma.clientStorage.getAsync('autoDetect').then(storedAutoDetect => {
+  
+  Promise.all([
+    figma.clientStorage.getAsync('autoDetect'),
+    figma.clientStorage.getAsync('lastUsedGap'),
+    figma.clientStorage.getAsync('pushEnabled')
+  ]).then(([storedAutoDetect, gap, storedPush]) => {
     if (storedAutoDetect !== undefined) isAutoDetectEnabled = storedAutoDetect;
-    figma.clientStorage.getAsync('lastUsedGap').then(gap => {
-      figma.ui.postMessage({ 
-        type: 'load-settings', 
-        gap: gap !== undefined ? gap : initialGap,
-        autoDetect: isAutoDetectEnabled
-      });
+    if (storedPush !== undefined) isPushEnabled = storedPush;
+    
+    figma.ui.postMessage({ 
+      type: 'load-settings', 
+      gap: gap !== undefined ? gap : initialGap,
+      autoDetect: isAutoDetectEnabled,
+      push: isPushEnabled
     });
   });
 } else {
-  figma.clientStorage.getAsync('autoDetect').then(storedAutoDetect => {
+  Promise.all([
+    figma.clientStorage.getAsync('autoDetect'),
+    figma.clientStorage.getAsync('lastUsedGap'),
+    figma.clientStorage.getAsync('pushEnabled')
+  ]).then(([storedAutoDetect, gap, storedPush]) => {
     const autoDetect = (storedAutoDetect !== undefined) ? storedAutoDetect : true;
-    if (autoDetect) performDuplicate(figma.command, null).then(() => figma.closePlugin());
-    else {
-      figma.clientStorage.getAsync('lastUsedGap').then(gap => {
-        performDuplicate(figma.command, gap !== undefined ? gap : 40).then(() => figma.closePlugin());
-      });
-    }
+    const push = (storedPush !== undefined) ? storedPush : true;
+    const finalGap = autoDetect ? null : (gap !== undefined ? gap : 40);
+    
+    performDuplicate(figma.command, finalGap, push).then(() => figma.closePlugin());
   });
 }
 
@@ -128,10 +209,16 @@ figma.ui.onmessage = msg => {
     figma.clientStorage.setAsync('autoDetect', msg.enabled);
     if (isAutoDetectEnabled) figma.ui.postMessage({ type: 'update-gap', gap: getDetectedGap(figma.currentPage.selection) });
   }
+  if (msg.type === 'toggle-push') {
+    isPushEnabled = msg.enabled;
+    figma.clientStorage.setAsync('pushEnabled', msg.enabled);
+  }
   if (msg.type === 'duplicate') {
     figma.clientStorage.setAsync('lastUsedGap', msg.gap);
     figma.clientStorage.setAsync('autoDetect', msg.autoDetect);
+    figma.clientStorage.setAsync('pushEnabled', msg.push);
     isAutoDetectEnabled = msg.autoDetect;
-    performDuplicate(msg.direction, msg.autoDetect ? null : msg.gap);
+    isPushEnabled = msg.push;
+    performDuplicate(msg.direction, msg.autoDetect ? null : msg.gap, msg.push);
   }
 };
