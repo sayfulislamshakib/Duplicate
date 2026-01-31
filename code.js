@@ -155,7 +155,7 @@ function expandSectionIfNeeded(node) {
   
   if (!section || section.type !== 'SECTION' || section.locked) return;
 
-  const PADDING = 100;
+  const PADDING = 80;
   
   // Calculate the collective bounds of all children relative to the section origin
   let minX = Infinity;
