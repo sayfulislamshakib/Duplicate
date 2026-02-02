@@ -78,6 +78,18 @@ jobs:
         run: |
           echo "No Breaking:/Release(s):/Fix: commits since last tag. Skipping."
 
+      - name: Check commit for release skip flag
+        id: skip_release
+        shell: bash
+        run: |
+          set -euo pipefail
+          MSG="$(git log -1 --pretty=%B)"
+          if echo "${MSG}" | grep -q '\[no release\]'; then
+            echo "skip_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Update RELEASES.md
         if: ${{ steps.compute.outputs.bump != 'none' && steps.compute.outputs.found_releases == 'true' }}
         shell: bash
@@ -151,7 +163,7 @@ jobs:
           git push origin "${TAG}"
 
       - name: Package release zip from manifest.json
-        if: ${{ steps.compute.outputs.bump != 'none' }}
+        if: ${{ steps.compute.outputs.bump != 'none' && steps.skip_release.outputs.skip_release == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -189,7 +201,7 @@ jobs:
           echo "Created $ZIP"
 
       - name: Build release notes (from RELEASES.md if available)
-        if: ${{ steps.compute.outputs.bump != 'none' }}
+        if: ${{ steps.compute.outputs.bump != 'none' && steps.skip_release.outputs.skip_release == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -231,7 +243,7 @@ jobs:
           fi
 
       - name: Create GitHub Release and upload zip
-        if: ${{ steps.compute.outputs.bump != 'none' }}
+        if: ${{ steps.compute.outputs.bump != 'none' && steps.skip_release.outputs.skip_release == 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.compute.outputs.new_tag }}

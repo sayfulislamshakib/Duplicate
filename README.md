@@ -49,5 +49,6 @@ Keep `RELEASES.md` populated with the `## vX.Y.Z` section that matches the tag n
 - The plugin uses `figma.clientStorage` to persist settings such as the last custom gap, push toggle, and blank-duplicate toggle.
 - Duplicated frames inside Auto Layout parents are inserted right next to the original thanks to the plugin's Auto Layout detection; there is no pushing in those contexts.
 - `expandSectionIfNeeded` ensures Section nodes stay padded after you add new content, so exported prototypes stay centered within their outlines.
+- When pushing fix commits that shouldn't publish a release, include `[no release]` in the last commit subject. The auto-version workflow still tags the next `duplicate-vX.Y.Z`, but it skips packaging and the GitHub Release step when that marker is present.
 
 Feel free to enhance the UI inside `ui.html`, add unit tests via your preferred tool (e.g., Jest + figma-js mock) if you need regression coverage, and update the workflows if your release process changes.
